@@ -2,7 +2,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <threads.h>
+
+#ifdef __APPLE__
+    #define MAP_STACK 0
+    #define MAP_GROWSDOWN 0
+#endif
+
+#define asm __asm__
+#define thread_local _Thread_local
+
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -51,7 +59,11 @@ void* __attribute__((naked)) generator_next(__attribute__((unused)) Generator *g
     "    pushq %r14\n"
     "    pushq %r15\n"
     "    movq %rsp, %rdx\n"     // rsp
+#ifdef __clang__
+    "    jmp _generator_switch_context\n"
+#else
     "    jmp generator_switch_context\n"
+#endif
     "    return_with_zero:\n"
     "       ret\n"
     );
@@ -117,7 +129,12 @@ void *__attribute__((naked)) generator_yield(__attribute__((unused)) void *arg)
     "    pushq %r14\n"
     "    pushq %r15\n"
     "    movq %rsp, %rsi\n"     // rsp
-    "    jmp generator_return\n");
+#ifdef __clang__
+    "    jmp _generator_return\n"
+#else
+    "    jmp generator_return\n"
+#endif
+    );
 }
 
 void generator_return(void *arg, void *rsp)
