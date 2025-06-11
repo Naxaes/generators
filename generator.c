@@ -2,7 +2,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <threads.h>
+
+#ifdef __APPLE__
+    #define MAP_STACK 0
+    #define MAP_GROWSDOWN 0
+#endif
+
+#define asm __asm__
+#define thread_local _Thread_local
+
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -36,13 +44,13 @@ void generator_init(void)
 // Linux x86_64 call convention
 // %rdi, %rsi, %rdx, %rcx, %r8, and %r9
 
-void* __attribute__((naked)) generator_next(Generator *g, void *arg)
+void* __attribute__((naked)) generator_next(__attribute__((unused)) Generator *g, __attribute__((unused)) void *arg)
 {
-    UNUSED(g);
-    UNUSED(arg);
     // @arch
-    if(g->dead){asm("xor %rax, %rax\n ret\n");}
     asm(
+    "    movb  16(%rdi), %al\n"         // %al = g->dead  (0 or 1)
+    "    decb  %al\n"                   // %al = %al - 1
+    "    jz    return_with_zero\n"      // if (!c) goto return_with_zero
     "    pushq %rdi\n"
     "    pushq %rbp\n"
     "    pushq %rbx\n"
@@ -51,13 +59,19 @@ void* __attribute__((naked)) generator_next(Generator *g, void *arg)
     "    pushq %r14\n"
     "    pushq %r15\n"
     "    movq %rsp, %rdx\n"     // rsp
-    "    jmp generator_switch_context\n");
+#ifdef __clang__
+    "    jmp _generator_switch_context\n"
+#else
+    "    jmp generator_switch_context\n"
+#endif
+    "    return_with_zero:\n"
+    "       ret\n"
+    );
 }
 
-void __attribute__((naked)) generator_restore_context(void *rsp)
+void __attribute__((naked)) generator_restore_context(__attribute__((unused)) void *rsp)
 {
     // @arch
-    (void)rsp;
     asm(
     "    movq %rdi, %rsp\n"
     "    popq %r15\n"
@@ -70,11 +84,9 @@ void __attribute__((naked)) generator_restore_context(void *rsp)
     "    ret\n");
 }
 
-void __attribute__((naked)) generator_restore_context_with_return(void *rsp, void *arg)
+void __attribute__((naked)) generator_restore_context_with_return(__attribute__((unused)) void *rsp, __attribute__((unused)) void *arg)
 {
     // @arch
-    UNUSED(rsp);
-    UNUSED(arg);
     asm(
     "    movq %rdi, %rsp\n"
     "    movq %rsi, %rax\n"
@@ -105,9 +117,8 @@ void generator_switch_context(Generator *g, void *arg, void *rsp)
     }
 }
 
-void *__attribute__((naked)) generator_yield(void *arg)
+void *__attribute__((naked)) generator_yield(__attribute__((unused)) void *arg)
 {
-    UNUSED(arg);
     // @arch
     asm(
     "    pushq %rdi\n"
@@ -118,7 +129,12 @@ void *__attribute__((naked)) generator_yield(void *arg)
     "    pushq %r14\n"
     "    pushq %r15\n"
     "    movq %rsp, %rsi\n"     // rsp
-    "    jmp generator_return\n");
+#ifdef __clang__
+    "    jmp _generator_return\n"
+#else
+    "    jmp generator_return\n"
+#endif
+    );
 }
 
 void generator_return(void *arg, void *rsp)
