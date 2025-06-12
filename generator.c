@@ -11,39 +11,22 @@
 #define asm __asm__
 #define thread_local _Thread_local
 
+#include <string.h>
 
 #include <sys/mman.h>
 #include <unistd.h>
 
-#define NOB_IMPLEMENTATION
-#define NOB_STRIP_PREFIX
-#include "nob.h"
-
 #include "generator.h"
-
-#define da_last(da) (NOB_ASSERT((da)->count > 0), (da)->items[(da)->count-1])
 
 #define GENERATOR_STACK_CAPACITY (1024*getpagesize())
 
-typedef struct {
-    Generator **items;
-    size_t count;
-    size_t capacity;
-} Generator_Stack;
 
-thread_local Generator_Stack generator_stack = {0};
+Generator  g_generator_main = { 0 };
+Generator* g_generator_stack = &g_generator_main;
 
-void generator_init(void)
-{
-    Generator *g = malloc(sizeof(Generator));
-    assert(g != NULL && "Buy more RAM lol");
-    memset(g, 0, sizeof(*g));
-    da_append(&generator_stack, g);
-}
 
 // Linux x86_64 call convention
 // %rdi, %rsi, %rdx, %rcx, %r8, and %r9
-
 void* __attribute__((naked)) generator_next(__attribute__((unused)) Generator *g, __attribute__((unused)) void *arg)
 {
     // @arch
@@ -102,8 +85,10 @@ void __attribute__((naked)) generator_restore_context_with_return(__attribute__(
 
 void generator_switch_context(Generator *g, void *arg, void *rsp)
 {
-    da_last(&generator_stack)->rsp = rsp;
-    da_append(&generator_stack, g);
+    g_generator_stack->rsp = rsp;
+    g->parent = g_generator_stack;
+    g_generator_stack = g;
+
     if (g->fresh) {
         g->fresh = false;
         // ******************************
@@ -139,27 +124,25 @@ void *__attribute__((naked)) generator_yield(__attribute__((unused)) void *arg)
 
 void generator_return(void *arg, void *rsp)
 {
-    da_last(&generator_stack)->rsp = rsp;
-    generator_stack.count -= 1;
-    generator_restore_context_with_return(da_last(&generator_stack)->rsp, arg);
+    assert(g_generator_stack->parent != NULL);
+    g_generator_stack->rsp = rsp;
+    g_generator_stack = g_generator_stack->parent;
+    generator_restore_context_with_return(g_generator_stack->rsp, arg);
 }
 
 void generator__finish_current(void)
 {
-    da_last(&generator_stack)->dead = true;
-    generator_stack.count -= 1;
-    generator_restore_context_with_return(da_last(&generator_stack)->rsp, NULL);
+    g_generator_stack->dead = true;
+    g_generator_stack = g_generator_stack->parent;
+    generator_restore_context_with_return(g_generator_stack->rsp, NULL);
 }
 
-Generator *generator_create(void (*f)(void*))
+Generator generator_create(void (*f)(void*))
 {
-    Generator *g = malloc(sizeof(Generator));
-    assert(g != NULL && "Buy more RAM lol");
-    memset(g, 0, sizeof(*g));
+    void* stack_base = mmap(NULL, GENERATOR_STACK_CAPACITY, PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_STACK|MAP_ANONYMOUS|MAP_GROWSDOWN, -1, 0);
+    assert(stack_base != MAP_FAILED);
 
-    g->stack_base = mmap(NULL, GENERATOR_STACK_CAPACITY, PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_STACK|MAP_ANONYMOUS|MAP_GROWSDOWN, -1, 0);
-    assert(g->stack_base != MAP_FAILED);
-    void **rsp = (void**)((char*)g->stack_base + GENERATOR_STACK_CAPACITY);
+    void **rsp = (void**)((char*)stack_base + GENERATOR_STACK_CAPACITY);
     *(--rsp) = generator__finish_current;
     *(--rsp) = f;
     *(--rsp) = 0;   // push rdi
@@ -169,13 +152,18 @@ Generator *generator_create(void (*f)(void*))
     *(--rsp) = 0;   // push r13
     *(--rsp) = 0;   // push r14
     *(--rsp) = 0;   // push r15
-    g->rsp = rsp;
-    g->fresh = true;
-    return g;
+
+    return (Generator) {
+        .rsp = rsp,
+        .stack_base = stack_base,
+        .dead = false,
+        .fresh = true,
+        .parent = NULL,
+    };
 }
 
 void generator_destroy(Generator *g)
 {
     munmap(g->stack_base, GENERATOR_STACK_CAPACITY);
-    free(g);
 }
+

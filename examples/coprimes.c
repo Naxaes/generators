@@ -77,19 +77,17 @@ void coprimes(void *imax_arg){
 
 int main(void)
 {
-    generator_init();
-
-    Generator *g = generator_create(coprimes);
+    Generator g = generator_create(coprimes);
     void *a, *b;
-    while(!(g)->dead){
-        a = generator_next(g, (void*)(5));
-        b = generator_next(g, (void*)(5));
-        if(!(g)->dead){
+    while(!g.dead){
+        a = generator_next(&g, (void*)(5));
+        b = generator_next(&g, (void*)(5));
+        if(!g.dead){
             printf("%ld , %ld\n", (long)a, (long)b);
         }
     }
 
-    generator_destroy(g);
+    generator_destroy(&g);
 
     return 0;
 }
