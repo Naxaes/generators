@@ -63,12 +63,11 @@ int main(int argc, char* argv[]){
         return 1;
     }
 
-    generator_init();
-    Generator *g = generator_create(lex);
+    Generator g = generator_create(lex);
 
     // Consume those tokens
     bool quit = false;
-    foreach (value, g, argv[1]) {
+    foreach (value, &g, argv[1]) {
         if (quit) break;
         Token *token = (Token*)value;
         switch(token->kind){
@@ -78,7 +77,7 @@ int main(int argc, char* argv[]){
         }
     }
 
-    generator_destroy(g);
+    generator_destroy(&g);
 
     return 0;
 }
