@@ -24,6 +24,21 @@
 Generator  g_generator_main = { 0 };
 Generator* g_generator_stack = &g_generator_main;
 
+#define GENERATOR_EXHAUSTED   ((void*)NULL)
+#define GENERATOR_NOT_STARTED ((void*)1)
+
+bool generator_is_invalid(Generator g) {
+    return g.stack_base == NULL;
+}
+
+bool generator_is_exhausted(Generator g) {
+    return g.parent == GENERATOR_EXHAUSTED;
+}
+
+bool generator_is_running(Generator g) {
+    return (uintptr_t)g.parent > (uintptr_t)GENERATOR_NOT_STARTED;
+}
+
 
 // Linux x86_64 call convention
 // %rdi, %rsi, %rdx, %rcx, %r8, and %r9
@@ -31,9 +46,6 @@ void* __attribute__((naked)) generator_next(__attribute__((unused)) Generator *g
 {
     // @arch
     asm(
-    "    movb  16(%rdi), %al\n"         // %al = g->dead  (0 or 1)
-    "    decb  %al\n"                   // %al = %al - 1
-    "    jz    return_with_zero\n"      // if (!c) goto return_with_zero
     "    pushq %rdi\n"
     "    pushq %rbp\n"
     "    pushq %rbx\n"
@@ -47,16 +59,15 @@ void* __attribute__((naked)) generator_next(__attribute__((unused)) Generator *g
 #else
     "    jmp generator_switch_context\n"
 #endif
-    "    return_with_zero:\n"
-    "       ret\n"
     );
 }
 
-void __attribute__((naked)) generator_restore_context(__attribute__((unused)) void *rsp)
+void __attribute__((naked)) generator_restore_context(__attribute__((unused)) void *rsp, __attribute__((unused)) void *arg)
 {
     // @arch
     asm(
-    "    movq %rdi, %rsp\n"
+    "    movq %rdi, %rsp\n"     // Set stack pointer to the new stack
+    "    movq %rsi, %rax\n"     // Set return value (for `generator_next` and `generator_yield`)
     "    popq %r15\n"
     "    popq %r14\n"
     "    popq %r13\n"
@@ -67,39 +78,26 @@ void __attribute__((naked)) generator_restore_context(__attribute__((unused)) vo
     "    ret\n");
 }
 
-void __attribute__((naked)) generator_restore_context_with_return(__attribute__((unused)) void *rsp, __attribute__((unused)) void *arg)
+void* generator_switch_context(Generator* g, void *arg, void *rsp)
 {
-    // @arch
-    asm(
-    "    movq %rdi, %rsp\n"
-    "    movq %rsi, %rax\n"
-    "    popq %r15\n"
-    "    popq %r14\n"
-    "    popq %r13\n"
-    "    popq %r12\n"
-    "    popq %rbx\n"
-    "    popq %rbp\n"
-    "    popq %rdi\n"
-    "    ret\n");
-}
-
-void generator_switch_context(Generator *g, void *arg, void *rsp)
-{
-    g_generator_stack->rsp = rsp;
-    g->parent = g_generator_stack;
-    g_generator_stack = g;
-
-    if (g->fresh) {
-        g->fresh = false;
-        // ******************************
-        // ^                          ^rsp
-        // stack_base
-        void **rsp = (void**)((char*)g->stack_base + GENERATOR_STACK_CAPACITY);
-        *(rsp-3) = arg;
-        generator_restore_context(g->rsp);
+    if (generator_is_running(*g)) {
+        g_generator_stack->rsp = rsp;
+        g_generator_stack = g;
+        generator_restore_context(g->rsp, arg);
+    } else if (generator_is_exhausted(*g)) {
+        generator_restore_context(rsp, arg);
+        return NULL;  // Unreachable
     } else {
-        generator_restore_context_with_return(g->rsp, arg);
+        g_generator_stack->rsp = rsp;
+        g->parent = g_generator_stack;
+        g_generator_stack = g;
+
+        void **sp = (void**)((char*)g->stack_base + GENERATOR_STACK_CAPACITY);
+        *(sp-3) = arg;
+
+        generator_restore_context(g->rsp, arg);
     }
+    return NULL;  // Unreachable
 }
 
 void *__attribute__((naked)) generator_yield(__attribute__((unused)) void *arg)
@@ -127,23 +125,26 @@ void generator_return(void *arg, void *rsp)
     assert(g_generator_stack->parent != NULL);
     g_generator_stack->rsp = rsp;
     g_generator_stack = g_generator_stack->parent;
-    generator_restore_context_with_return(g_generator_stack->rsp, arg);
+    generator_restore_context(g_generator_stack->rsp, arg);
 }
 
-void generator__finish_current(void)
+void generator_finish_current(void)
 {
-    g_generator_stack->dead = true;
-    g_generator_stack = g_generator_stack->parent;
-    generator_restore_context_with_return(g_generator_stack->rsp, NULL);
+    Generator* g = g_generator_stack;
+    g_generator_stack = g->parent;
+    g->parent = GENERATOR_EXHAUSTED;
+    generator_restore_context(g_generator_stack->rsp, NULL);
 }
 
 Generator generator_create(void (*f)(void*))
 {
     void* stack_base = mmap(NULL, GENERATOR_STACK_CAPACITY, PROT_WRITE|PROT_READ, MAP_PRIVATE|MAP_STACK|MAP_ANONYMOUS|MAP_GROWSDOWN, -1, 0);
-    assert(stack_base != MAP_FAILED);
+    if (stack_base == MAP_FAILED) {
+        return g_generator_main;
+    }
 
     void **rsp = (void**)((char*)stack_base + GENERATOR_STACK_CAPACITY);
-    *(--rsp) = generator__finish_current;
+    *(--rsp) = generator_finish_current;
     *(--rsp) = f;
     *(--rsp) = 0;   // push rdi
     *(--rsp) = 0;   // push rbx
@@ -156,14 +157,13 @@ Generator generator_create(void (*f)(void*))
     return (Generator) {
         .rsp = rsp,
         .stack_base = stack_base,
-        .dead = false,
-        .fresh = true,
-        .parent = NULL,
+        .parent = GENERATOR_NOT_STARTED,
     };
 }
 
 void generator_destroy(Generator *g)
 {
     munmap(g->stack_base, GENERATOR_STACK_CAPACITY);
+    memset(g, 0, sizeof(*g));
 }
 

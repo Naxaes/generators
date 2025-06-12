@@ -79,10 +79,10 @@ int main(void)
 {
     Generator g = generator_create(coprimes);
     void *a, *b;
-    while(!g.dead){
+    while (!generator_is_exhausted(g)){
         a = generator_next(&g, (void*)(5));
         b = generator_next(&g, (void*)(5));
-        if(!g.dead){
+        if(!generator_is_exhausted(g)){
             printf("%ld , %ld\n", (long)a, (long)b);
         }
     }
