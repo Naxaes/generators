@@ -1,10 +1,11 @@
+#define GENERATOR_IMPLEMENTATION
+#define GENERATOR_ASSERT(x)
+#include "generator.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define GENERATOR_IMPLEMENTATION
-#include "generator.h"
 
 void* fib(void *arg)
 {
@@ -24,8 +25,6 @@ void* fib(void *arg)
 
 int main(void)
 {
-    next(g_current_generator_context);
-
     char* base = malloc(1024);
 
     memset(base + 0 * 256, 0xaa, 256);
@@ -34,11 +33,11 @@ int main(void)
     memset(base + 3 * 256, 0xdd, 256);
 
     Generator g = generator_create(fib, (void*)25, base + 2*256, 256);
+
     long i = 0;
-    for (void* value = next(&g); has_next(g); value = next_send(&g, i++)) {
+    foreach_send(value, &g, i++) {
         printf("%ld\n", (long)value);
     }
-
 
     long ret = (long) generator_return_value(g);
     void* stack = generator_destroy(&g);

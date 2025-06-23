@@ -5,13 +5,11 @@
 #include <stddef.h>
 
 typedef struct Generator {
-    void* stack_base;
+    const void* stack_base;
     void* stack_ptr;
-    void* stack_top;
+    const void* stack_top;
     struct Generator* parent;
 } Generator;
-
-extern Generator* g_current_generator_context;
 
 bool generator_is_exhausted(Generator g);
 bool generator_is_running(Generator g);
@@ -36,15 +34,16 @@ void*     generator_destroy(Generator *g);
 
 #endif // GENERATOR_H_
 
-#define  GENERATOR_IMPLEMENTATION
+
 #ifdef GENERATOR_IMPLEMENTATION
 
 #include <stdint.h>
 
+#ifndef GENERATOR_ASSERT
 #include <assert.h>
-
-#define asm __asm__
-#define thread_local _Thread_local
+#define GENERATOR_ASSERT(x) assert(x)
+#else
+#endif
 
 
 Generator  g_generator_main = { 0 };
@@ -56,7 +55,7 @@ Generator* g_current_generator_context = &g_generator_main;
 void return_from_current_generator(void);
 Generator generator_create(void* (*f)(void*), void* arg, void* stack, size_t stack_size)
 {
-    assert(stack_size >= 16*sizeof(void*) + 16*sizeof(void*));
+    GENERATOR_ASSERT(stack_size >= 16*sizeof(void*) + 16*sizeof(void*));
     // TODO: Align stack pointer to 16 bytes
 
     void*  stack_top = (char*)stack + stack_size;
@@ -82,13 +81,13 @@ Generator generator_create(void* (*f)(void*), void* arg, void* stack, size_t sta
 
 void* generator_return_value(Generator g)
 {
-    assert(generator_is_exhausted(g));
+    GENERATOR_ASSERT(generator_is_exhausted(g));
     return *((void**)g.stack_top - 1);
 }
 
 void* generator_destroy(Generator *g)
 {
-    void* base = g->stack_base;
+    void* base = (void*) g->stack_base;
     *g = (Generator) { 0 };
     return base;
 }
@@ -107,7 +106,7 @@ bool generator_is_running(Generator g) {
 void* __attribute__((naked)) generator_switch(__attribute__((unused)) Generator *g, __attribute__((unused)) void *arg)
 {
     // @arch - Push the `arg` on the stack and then all callee-saved registers. Then jump to `switch_context`.
-    asm(
+    __asm__(
     "    pushq %rdi\n"
     "    pushq %rbp\n"
     "    pushq %rbx\n"
@@ -123,7 +122,7 @@ void* __attribute__((naked)) generator_switch(__attribute__((unused)) Generator 
 void __attribute__((naked)) restore_context(__attribute__((unused)) void *rsp, __attribute__((unused)) void *arg)
 {
     // @arch - Set the stack to `rsp` and prepare the return value `arg`. Then restore all callee-saved registers before returning.
-    asm(
+    __asm__(
     "    movq %rdi, %rsp\n"     // Set stack pointer to the new stack
     "    movq %rsi, %rax\n"     // Set return value (for `generator_next` and `generator_yield`)
     "    popq %r15\n"
@@ -137,7 +136,7 @@ void __attribute__((naked)) restore_context(__attribute__((unused)) void *rsp, _
     );
 }
 
-extern void switch_context(Generator* g, void *arg, void *rsp) asm("switch_context");
+extern void switch_context(Generator* g, void *arg, void *rsp) __asm__("switch_context");
 void switch_context(Generator* g, void *arg, void *rsp)
 {
     // Set current context rsp
@@ -145,7 +144,7 @@ void switch_context(Generator* g, void *arg, void *rsp)
 
     if (g == NULL) {
         // yield
-        assert(g_current_generator_context->parent != NULL);
+        GENERATOR_ASSERT(g_current_generator_context->parent != NULL);
         g_current_generator_context = g_current_generator_context->parent;
         restore_context(g_current_generator_context->stack_ptr, arg);
     } else if (generator_is_running(*g)) {
@@ -175,6 +174,5 @@ void return_from_current_generator(void)
 }
 
 
-
-
+#undef GENERATOR_ASSERT
 #endif
