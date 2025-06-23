@@ -5,7 +5,9 @@
 #include <stdio.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
+#define GENERATOR_IMPLEMENTATION
 #include "generator.h"
 
 typedef enum {
@@ -24,8 +26,8 @@ typedef struct {
     TokenValue value;
 } Token;
 
-void lex(void* input_void) {
-    if (input_void == NULL) return;
+void* lex(void* input_void) {
+    if (input_void == NULL) return NULL;
 
     const char* input = input_void;
     Token token = {0};
@@ -47,14 +49,16 @@ void lex(void* input_void) {
 
             default: {
                 token.kind = TK_EOF;
-                return;
+                return NULL;
             }
         }
         input++;
 
         // For every token we consume, we yield control back to the caller (a parser, I guess).
-        generator_yield(&token);
+        yield(&token);
     }
+
+    return NULL;
 }
 
 int main(int argc, char* argv[]){
@@ -63,13 +67,14 @@ int main(int argc, char* argv[]){
         return 1;
     }
 
-    Generator g = generator_create(lex);
+    void* base = malloc(4096);
+    Generator g = generator_create(lex, argv[1], base, 4096);
 
     // Consume those tokens
     bool quit = false;
-    foreach (value, &g, argv[1]) {
+    foreach (value, &g) {
         if (quit) break;
-        Token *token = (Token*)value;
+        Token *token = value;
         switch(token->kind){
             case TK_INT: { printf("TK_INT: %d\n", token->value.tk_int); } break;
             case TK_OP:  { printf("TK_OP:  %c\n", token->value.tk_op);  } break;
@@ -77,7 +82,7 @@ int main(int argc, char* argv[]){
         }
     }
 
-    generator_destroy(&g);
+    free(generator_destroy(&g));
 
     return 0;
 }

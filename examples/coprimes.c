@@ -1,19 +1,22 @@
 #include <stdio.h>
+#include <stdlib.h>
+
+#define GENERATOR_IMPLEMENTATION
 #include "generator.h"
 
-void coprimes(void *imax_arg){
+void* coprimes(void *imax_arg){
     unsigned long m,n,aux;
     unsigned long imax = (unsigned long)imax_arg;
     int br;
 
-    if(imax<2){ return; }
+    if(imax<2){ return NULL; }
 
     m=2;
     n=1;
-    generator_yield((void*)m);
-    generator_yield((void*)n);
+    yield(m);
+    yield(n);
 
-    if(imax<3){ return; }
+    if(imax<3){ return NULL; }
 
     br=0;
     while(m!=1){
@@ -23,8 +26,8 @@ void coprimes(void *imax_arg){
             m=(m<<1)-n;
             n=aux;
             br=0;
-            generator_yield((void*)m);
-            generator_yield((void*)n);
+            yield(m);
+            yield(n);
             continue;
         }
         aux=(m<<1)+n;
@@ -33,16 +36,16 @@ void coprimes(void *imax_arg){
             m=(m<<1)+n;
             n=aux;
             br=0;
-            generator_yield((void*)m);
-            generator_yield((void*)n);
+            yield(m);
+            yield(n);
             continue;
         }
         aux=m+(n<<1);
         if(aux<=imax && br<3){
             m=m+(n<<1);
             br=0;
-            generator_yield((void*)m);
-            generator_yield((void*)n);
+            yield(m);
+            yield(n);
             continue;
         }
 
@@ -68,26 +71,29 @@ void coprimes(void *imax_arg){
             m = 3;
             n = 1;
             br=0;
-            generator_yield((void*)m);
-            generator_yield((void*)n);
+            yield(m);
+            yield(n);
         }
     }
-    return;
+
+    return NULL;
 }
 
 int main(void)
 {
-    Generator g = generator_create(coprimes);
-    void *a, *b;
-    while (!generator_is_exhausted(g)){
-        a = generator_next(&g, (void*)(5));
-        b = generator_next(&g, (void*)(5));
-        if(!generator_is_exhausted(g)){
+    int n = 4096;
+    void* base = malloc(n);
+
+    Generator g = generator_create(coprimes, (void*)5, base, n);
+    while (has_next(g)) {
+        void *a = next(&g);
+        void *b = next(&g);
+        if (has_next(g)) {
             printf("%ld , %ld\n", (long)a, (long)b);
         }
     }
 
-    generator_destroy(&g);
+    free(generator_destroy(&g));
 
     return 0;
 }

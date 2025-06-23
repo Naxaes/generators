@@ -235,7 +235,7 @@ void nob_log(Nob_Log_Level level, const char *fmt, ...);
 // the beginning of a sized array.
 #define nob_shift(xs, xs_sz) (NOB_ASSERT((xs_sz) > 0), (xs_sz)--, *(xs)++)
 // NOTE: nob_shift_args() is an alias for an old variant of nob_shift that only worked with
-// the command line arguments passed to the main() function. nob_shift() is more generic.
+// the command line arguments passed to the main(void) function. nob_shift() is more generic.
 // So nob_shift_args() is semi-deprecated, but I don't see much reason to urgently
 // remove it. This alias does not hurt anybody.
 #define nob_shift_args(argc, argv) nob_shift(*argv, *argc)

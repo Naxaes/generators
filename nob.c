@@ -4,7 +4,7 @@
 
 #define BUILD_FOLDER "build/"
 #define EXAMPLES_FOLDER "examples/"
-#define cc_with_cflags(cmd) cmd_append(cmd, "cc", "-Wall", "-Wextra", "-ggdb", "-I.")
+#define cc_with_cflags(cmd) cmd_append(cmd, "cc", "-std=c99", "-O2", "-arch", "x86_64", "-Wall", "-Wextra", "-pedantic", "-g", "-ggdb", "-I.")
 #define cc_output(cmd, output_path) cmd_append(cmd, "-o", output_path);
 
 struct {
@@ -39,16 +39,11 @@ int main(int argc, char **argv)
 
     if (!nob_mkdir_if_not_exists(BUILD_FOLDER)) return 1;
 
-    cc_with_cflags(&cmd);
-    cc_output(&cmd, BUILD_FOLDER"generator.o");
-    cmd_append(&cmd, "-c", "generator.c");
-    if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
-
     for (size_t i = 0; i < ARRAY_LEN(examples); ) {
         for (size_t j = 0; i < ARRAY_LEN(examples) && j < nprocs; ++j, ++i) {
             cc_with_cflags(&cmd);
             cc_output(&cmd, examples[i].output_path);
-            cmd_append(&cmd, examples[i].input_path, BUILD_FOLDER"generator.o");
+            cmd_append(&cmd, examples[i].input_path);
             da_append(&procs, nob_cmd_run_async_and_reset(&cmd));
         }
         if (!nob_procs_wait_and_reset(&procs)) return 1;

@@ -1,20 +1,28 @@
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
+
+#define GENERATOR_IMPLEMENTATION
 #include "generator.h"
 
-void primes(void *arg)
+void* primes(void *arg)
 {
-    (void) arg;
+    long up_to = arg ? (long) arg : LONG_MAX;
 
-    generator_yield((void*)2);
+    yield(2);
 
-    for (long n = 3; true; n += 2) {
-        Generator primes_gen = generator_create(primes);
+    for (long n = 3; n < up_to; n += 2) {
+        int stack_size = 4096;
+        void* stack = malloc(stack_size);
+
+        Generator primes_gen = generator_create(primes, NULL, stack, stack_size);
 
         bool is_prime = true;
-        foreach (value, &primes_gen, NULL) {
+        foreach (value, &primes_gen) {
             long p = (long)value;
 
-            if (p * p > n) break;
+            if (p * p > n)
+                break;
 
             if (n % p == 0) {
                 is_prime = false;
@@ -22,18 +30,23 @@ void primes(void *arg)
             }
         }
 
-        generator_destroy(&primes_gen);
+        free(generator_destroy(&primes_gen));
 
-        if (is_prime) generator_yield((void*)n);
+        if (is_prime) yield(n);
     }
+
+    return NULL;
 }
 
-int main()
+
+int main(void)
 {
-    Generator g = generator_create(primes);
-    foreach (value, &g, NULL) {
+    int stack_size = 4096;
+    void* stack = malloc(stack_size);
+    Generator g = generator_create(primes, (void*) 1000, stack, stack_size);
+    foreach (value, &g) {
         printf("%ld\n", (long)value);
     }
 
-    generator_destroy(&g);
+    free(generator_destroy(&g));
 }
